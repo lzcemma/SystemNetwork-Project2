@@ -230,7 +230,6 @@ class Demultiplexer extends Thread {
     // for the ConnectionTable
     public String getHashTableKey(InetAddress remoteHost,
                                 int localPort, int remotePort) {
-        System.out.println("in get hashtablekey"+remoteHost+localPort+remotePort);
         return( remoteHost.getHostAddress() + Integer.toString(localPort)
                 + Integer.toString(remotePort));
     }

@@ -56,6 +56,12 @@ class StudentSocketImpl extends BaseSocketImpl {
     //register the listening connection with the Demultiplexer
     D.registerListeningSocket(localport,this);
 
+    try{
+      this.wait();
+    }
+    catch(Exception e){
+      System.err.println("error happend while waiting");
+    }
   }
 
 
