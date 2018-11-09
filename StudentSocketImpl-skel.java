@@ -36,14 +36,14 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   public synchronized void connect(InetAddress address, int port) throws IOException{
     //intialize state
-    seqNum = 700;
+    seqNum = 100;
     localport = D.getNextAvailablePort();
 
     // register the socket with demultiplexer
     D.registerConnection(address, localport, port,this);
 
     //send a syn packet to the waiting server
-    TCPPacket synPacket = new TCPPacket(localport,port,100,1,false,true,false,1,null);
+    TCPPacket synPacket = new TCPPacket(localport,port,100,-2,false,true,false,1,null);
     TCPWrapper.send(synPacket, address);
     System.out.println("send syn packet" + synPacket.toString());
     switchState(State.SYN_SENT);
@@ -52,6 +52,13 @@ class StudentSocketImpl extends BaseSocketImpl {
   public synchronized  void switchState(State s){
     System.out.println("state changed from" + state +" to " + s);
     state = s;
+  }
+
+  public synchronized void updateAfterRcv(TCPPacket p){
+    seqNum = p.ackNum;
+    ackNum = p.seqNum + 1;
+    address = p.sourceAddr;
+    port = p.sourcePort;
   }
 
   /**
@@ -89,18 +96,24 @@ class StudentSocketImpl extends BaseSocketImpl {
           catch(IOException e){
             e.printStackTrace();
           }
+          switchState(State.SYN_RCVD);
 
         }
-      //case SYN_RCVD:
 
-
-
-
-
-
-
-
+      case SYN_SENT:
+        if (p.synFlag && p.ackFlag) {
+          updateAfterRcv(p);
+          TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 20, null);
+          switchState(State.ESTABLISHED);
+          TCPWrapper.send(ackPacket, address);
+        }
+      case SYN_RCVD:
+        if(p.ackFlag && !p.synFlag){
+          System.out.println("receive ACK");
+          switchState(State.ESTABLISHED);
+        }
     }
+
   }
 
   /**
@@ -115,6 +128,7 @@ class StudentSocketImpl extends BaseSocketImpl {
     System.out.println("in studentSocketImp.acceptConnection" + localport);
     D.registerListeningSocket(localport,this);
     switchState(State.LISTEN);
+    seqNum = 200;
 
   }
 
