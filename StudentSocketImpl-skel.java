@@ -11,10 +11,19 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   private Demultiplexer D;
   private Timer tcpTimer;
-
+  private int windowSize = 20;
+  private int seqNum;
+  private int ackNum;
+  private enum State {
+    CLOSED, LISTEN,ESTABLISHED,CLOSING,TIME_WAIT,SYN_SENT,CLOSE_WAIT,LAST_ACK, SYN_RCVD, FIN_WAIT1, FIN_WAIT2;
+  }
+  private State state;
 
   StudentSocketImpl(Demultiplexer D) {  // default constructor
     this.D = D;
+    state = State.CLOSED;
+    seqNum = -1;
+    ackNum = -1;
   }
 
   /**
@@ -27,14 +36,22 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   public synchronized void connect(InetAddress address, int port) throws IOException{
     //intialize state
+    seqNum = 700;
     localport = D.getNextAvailablePort();
 
     // register the socket with demultiplexer
     D.registerConnection(address, localport, port,this);
 
-    //send a syn packet to the waiting servert
-    TCPPacket synPacket = new TCPPacket(localport,port,100,-1,false,true,false,1,null);
+    //send a syn packet to the waiting server
+    TCPPacket synPacket = new TCPPacket(localport,port,100,1,false,true,false,1,null);
     TCPWrapper.send(synPacket, address);
+    System.out.println("send syn packet" + synPacket.toString());
+    switchState(State.SYN_SENT);
+  }
+
+  public synchronized  void switchState(State s){
+    System.out.println("state changed from" + state +" to " + s);
+    state = s;
   }
 
   /**
@@ -42,7 +59,48 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @param p The packet that arrived
    */
   public synchronized void receivePacket(TCPPacket p){
+    System.out.println("======In receivePacket()=======");
+    System.out.println("state: " + state);
+    System.out.println(p.getDebugOutput());
     System.out.println(p.toString());
+
+    //alert any other threads waiting for this event
+    this.notifyAll();
+
+    switch(state){
+      case LISTEN:
+        //receive SYN packet
+        if(p.synFlag && !p.ackFlag){
+          state = State.SYN_RCVD;
+          seqNum = 200;
+          ackNum = p.seqNum + 1;
+          address = p.sourceAddr;
+          port = p.sourcePort;
+
+          //send out syn ack
+          TCPPacket synAckPacket = new TCPPacket(localport,port,seqNum , ackNum, true, true, false,1,null);
+          TCPWrapper.send(synAckPacket,address);
+
+          try{
+            //listner unregister listening connection and re-register as a regular connection
+            D.unregisterListeningSocket(localport,this);
+            D.registerConnection(p.sourceAddr, p.destPort, p.sourcePort, this);
+          }
+          catch(IOException e){
+            e.printStackTrace();
+          }
+
+        }
+      //case SYN_RCVD:
+
+
+
+
+
+
+
+
+    }
   }
 
   /**
@@ -54,14 +112,10 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   public synchronized void acceptConnection() throws IOException {
     //register the listening connection with the Demultiplexer
+    System.out.println("in studentSocketImp.acceptConnection" + localport);
     D.registerListeningSocket(localport,this);
+    switchState(State.LISTEN);
 
-    try{
-      this.wait();
-    }
-    catch(Exception e){
-      System.err.println("error happend while waiting");
-    }
   }
 
 

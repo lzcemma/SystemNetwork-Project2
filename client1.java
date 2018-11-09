@@ -9,6 +9,7 @@ public class client1 {
     }
 
     try{
+
       TCPStart.start();
       
       Socket sock = new Socket(argv[0], Integer.parseInt(argv[1]));
