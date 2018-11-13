@@ -2,7 +2,7 @@ import java.net.Socket;
 
 public class client2 {
   public static void main(String[] argv){
-    System.out.println(argv[0]+ argv[1]);
+    
     if(argv.length!= 2){
       System.err.println("usage: client1 <hostname> <hostport>");
       System.exit(1);

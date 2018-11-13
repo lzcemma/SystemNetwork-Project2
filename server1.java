@@ -13,7 +13,6 @@ public class server1 {
       TCPStart.start();
       
       ServerSocket sock = new ServerSocket(Integer.parseInt(argv[0]));
-
       Socket connSock = sock.accept();
 
       System.out.println("got socket "+connSock);

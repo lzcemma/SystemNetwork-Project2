@@ -12,18 +12,18 @@ class StudentSocketImpl extends BaseSocketImpl {
   private Demultiplexer D;
   private Timer tcpTimer;
   private int windowSize = 20;
+
+  private State tcpState;
   private int seqNum;
   private int ackNum;
-  private enum State {
-    CLOSED, LISTEN,ESTABLISHED,CLOSING,TIME_WAIT,SYN_SENT,CLOSE_WAIT,LAST_ACK, SYN_RCVD, FIN_WAIT1, FIN_WAIT2;
+
+  public enum State {
+    CLOSED,SYN_SENT,LISTEN,SYN_RCVD,ESTABLISHED,FIN_WAIT_1,FIN_WAIT_2,CLOSE_WAIT,LAST_ACK,CLOSING,TIME_WAIT;
   }
-  private State state;
 
   StudentSocketImpl(Demultiplexer D) {  // default constructor
     this.D = D;
-    state = State.CLOSED;
-    seqNum = -1;
-    ackNum = -1;
+    tcpState = State.CLOSED;
   }
 
   /**
@@ -35,30 +35,24 @@ class StudentSocketImpl extends BaseSocketImpl {
    *               connection.
    */
   public synchronized void connect(InetAddress address, int port) throws IOException{
-    //intialize state
-    seqNum = 100;
+    seqNum = 1000;
+    ackNum = 100;
     localport = D.getNextAvailablePort();
 
-    // register the socket with demultiplexer
-    D.registerConnection(address, localport, port,this);
-
-    //send a syn packet to the waiting server
-    TCPPacket synPacket = new TCPPacket(localport,port,100,-2,false,true,false,1,null);
+    D.registerConnection(address,localport,port,this);
+    TCPPacket synPacket = new TCPPacket(localport, port,seqNum ,ackNum ,false , true, false, windowSize, null);
     TCPWrapper.send(synPacket, address);
-    System.out.println("send syn packet" + synPacket.toString());
+    System.out.println(synPacket.getDebugOutput());
+
     switchState(State.SYN_SENT);
-  }
 
-  public synchronized  void switchState(State s){
-    System.out.println("state changed from" + state +" to " + s);
-    state = s;
-  }
-
-  public synchronized void updateAfterRcv(TCPPacket p){
-    seqNum = p.ackNum;
-    ackNum = p.seqNum + 1;
-    address = p.sourceAddr;
-    port = p.sourcePort;
+    while (tcpState != State.ESTABLISHED){
+      try {
+        wait();
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
   }
 
   /**
@@ -66,54 +60,93 @@ class StudentSocketImpl extends BaseSocketImpl {
    * @param p The packet that arrived
    */
   public synchronized void receivePacket(TCPPacket p){
-    System.out.println("======In receivePacket()=======");
-    System.out.println("state: " + state);
-    System.out.println(p.getDebugOutput());
+    System.out.println("Receive Packet    State: "+tcpState);
     System.out.println(p.toString());
+    System.out.println(p.getDebugOutput());
 
-    //alert any other threads waiting for this event
     this.notifyAll();
 
-    switch(state){
+    address = p.sourceAddr;
+    port = p.sourcePort;
+    seqNum = p.ackNum;
+    ackNum = p.seqNum + 1;
+
+    switch (tcpState){
       case LISTEN:
-        //receive SYN packet
-        if(p.synFlag && !p.ackFlag){
-          state = State.SYN_RCVD;
+        if (p.synFlag && !p.ackFlag){
           seqNum = 200;
-          ackNum = p.seqNum + 1;
-          address = p.sourceAddr;
-          port = p.sourcePort;
+//          ackNum = p.seqNum + 1;
+          TCPPacket synAckPkt = new TCPPacket(localport, port,seqNum ,ackNum ,true , true, false, windowSize, null);
+          TCPWrapper.send(synAckPkt, address);
 
-          //send out syn ack
-          TCPPacket synAckPacket = new TCPPacket(localport,port,seqNum , ackNum, true, true, false,1,null);
-          TCPWrapper.send(synAckPacket,address);
-
-          try{
-            //listner unregister listening connection and re-register as a regular connection
-            D.unregisterListeningSocket(localport,this);
-            D.registerConnection(p.sourceAddr, p.destPort, p.sourcePort, this);
-          }
-          catch(IOException e){
+          try {
+            D.unregisterListeningSocket(localport, this);
+            D.registerConnection(address, localport, port, this);
+          } catch (IOException e) {
             e.printStackTrace();
           }
           switchState(State.SYN_RCVD);
-
         }
+        break;
 
       case SYN_SENT:
-        if (p.synFlag && p.ackFlag) {
-          updateAfterRcv(p);
-          TCPPacket ackPacket = new TCPPacket(localport, port, seqNum, ackNum, true, false, false, 20, null);
-          switchState(State.ESTABLISHED);
-          TCPWrapper.send(ackPacket, address);
-        }
-      case SYN_RCVD:
-        if(p.ackFlag && !p.synFlag){
-          System.out.println("receive ACK");
+        if (p.synFlag && p.ackFlag){
+          TCPPacket ackPkt = new TCPPacket(localport, port,-2 ,ackNum ,true , false, false, windowSize, null);
+          TCPWrapper.send(ackPkt, address);
           switchState(State.ESTABLISHED);
         }
-    }
+        break;
 
+      case SYN_RCVD:
+        if (p.ackFlag){
+          switchState(State.ESTABLISHED);
+        }
+        break;
+
+      case ESTABLISHED:
+        if (p.finFlag){
+          TCPPacket ackPkt = new TCPPacket(localport, port,-2 ,ackNum ,true , false, false, windowSize, null);
+          TCPWrapper.send(ackPkt, address);
+          switchState(State.CLOSE_WAIT);
+        }
+        break;
+
+      case FIN_WAIT_1:
+        if (p.finFlag){
+          TCPPacket ackPkt = new TCPPacket(localport, port,-2 ,ackNum ,true , false, false, windowSize, null);
+          TCPWrapper.send(ackPkt, address);
+          switchState(State.CLOSING);
+        }
+
+        if (p.ackFlag){
+          switchState(State.FIN_WAIT_2);
+        }
+        break;
+
+      case CLOSING:
+        if (p.ackFlag){
+          switchState(State.TIME_WAIT);
+        }
+        break;
+
+      case FIN_WAIT_2:
+        if (p.finFlag){
+          TCPPacket ackPkt = new TCPPacket(localport, port,-2 ,ackNum ,true , false, false, windowSize, null);
+          TCPWrapper.send(ackPkt, address);
+          switchState(State.TIME_WAIT);
+        }
+        break;
+
+      case LAST_ACK:
+        if (p.ackFlag){
+          switchState(State.TIME_WAIT);
+        }
+        break;
+
+      default:
+        break;
+
+    }
   }
 
   /**
@@ -124,18 +157,23 @@ class StudentSocketImpl extends BaseSocketImpl {
    * Note that localport is already set prior to this being called.
    */
   public synchronized void acceptConnection() throws IOException {
-    //register the listening connection with the Demultiplexer
-    System.out.println("in studentSocketImp.acceptConnection" + localport);
-    D.registerListeningSocket(localport,this);
+    D.registerListeningSocket(localport, this);
+    System.out.println("Accept Connection");
     switchState(State.LISTEN);
-    seqNum = 200;
 
+    while (tcpState != State.ESTABLISHED && tcpState != State.SYN_RCVD){
+      try {
+        wait();
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
   }
 
 
   /**
    * Returns an input stream for this socket.  Note that this method cannot
-   * create a NEW InputStream, but must return a reference to an
+   * create a NEW InputStream, but must return a reference to an 
    * existing InputStream (that you create elsewhere) because it may be
    * called more than once.
    *
@@ -151,7 +189,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   /**
    * Returns an output stream for this socket.  Note that this method cannot
-   * create a NEW InputStream, but must return a reference to an
+   * create a NEW InputStream, but must return a reference to an 
    * existing InputStream (that you create elsewhere) because it may be
    * called more than once.
    *
@@ -166,11 +204,32 @@ class StudentSocketImpl extends BaseSocketImpl {
 
 
   /**
-   * Closes this socket.
+   * Closes this socket. 
    *
    * @exception  IOException  if an I/O error occurs when closing this socket.
    */
   public synchronized void close() throws IOException {
+    TCPPacket finPkt = new TCPPacket(localport, port,ackNum ,seqNum ,false , false, true, windowSize, null);
+    TCPWrapper.send(finPkt, address);
+
+    if (tcpState == State.ESTABLISHED){
+      tcpState = State.FIN_WAIT_1;
+    } else if (tcpState == State.CLOSE_WAIT){
+      tcpState = State.LAST_ACK;
+    }
+
+    //since we need to immediately return, start a new thread and pass in this studentSocketImpl and let the work
+    //finished in the background in the new created thread
+
+    try {
+      backgroundThread newThread = new backgroundThread(this);
+      newThread.run();
+    }
+    catch( Exception e){
+      e.printStackTrace();
+    }
+    return;
+
   }
 
   /**
@@ -187,7 +246,7 @@ class StudentSocketImpl extends BaseSocketImpl {
 
   /**
    * handle timer expiration (called by TCPTimerTask)
-   * @param ref Generic reference that can be used by the timer to return
+   * @param ref Generic reference that can be used by the timer to return 
    * information.
    */
   public synchronized void handleTimer(Object ref){
@@ -195,5 +254,31 @@ class StudentSocketImpl extends BaseSocketImpl {
     // this must run only once the last timer (30 second timer) has expired
     tcpTimer.cancel();
     tcpTimer = null;
+  }
+
+  private void switchState(State newState){
+    System.out.println("!!! "+tcpState+"->"+newState);
+    tcpState = newState;
+  }
+
+  public State getState(){
+    return tcpState;
+  }
+}
+class backgroundThread implements Runnable{
+  public StudentSocketImpl waitingToClose;
+  //pass in studentsocketimpl object to the new thread, and let is finish up in this thread
+  public backgroundThread(StudentSocketImpl s) throws InterruptedException{
+    waitingToClose = s;
+  }
+
+  public void run(){
+    while(waitingToClose.getState()!= StudentSocketImpl.State.CLOSED){
+      try{
+        waitingToClose.wait();
+      }catch(Exception e){
+        e.printStackTrace();
+      }
+    }
   }
 }

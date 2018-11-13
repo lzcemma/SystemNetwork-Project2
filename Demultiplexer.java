@@ -98,7 +98,7 @@ class Demultiplexer extends Thread {
                 p = new DatagramPacket(buf,TCPPacket.MAX_PACKET_SIZE+20);
 
                 ds.receive(p);
-                System.out.println("received datagram");
+
                 // when received, invoke TCPWrapper.unwrap(datagram)
                 packet = TCPWrapper.unwrap(p);
 
