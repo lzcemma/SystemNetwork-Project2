@@ -11,18 +11,15 @@ public class server2 {
 
     try{
       TCPStart.start();
+      
+      ServerSocket sock = new ServerSocket(Integer.parseInt(argv[0]));
+      Socket connSock = sock.accept();
 
-      for (int i = 0;i<1; i++) {
-        ServerSocket sock = new ServerSocket(Integer.parseInt(argv[0]));
-        Socket connSock = sock.accept();
+      System.out.println("got socket "+connSock);
 
-        System.out.println("got socket "+connSock);
-
-        Thread.sleep(10*1000);
-        System.out.println(System.currentTimeMillis() + "!!!!!closed");
-        connSock.close();
-        sock.close();
-      }
+      Thread.sleep(10*1000);
+      connSock.close();
+      sock.close();
     }
     catch(Exception e){
       System.err.println("Caught exception "+e);

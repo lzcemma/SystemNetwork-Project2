@@ -49,7 +49,8 @@ class StudentSocketImpl extends BaseSocketImpl {
     D.registerConnection(address,localport,port,this);
     TCPPacket synPacket = new TCPPacket(localport, port,seqNum ,ackNum ,false , true, false, windowSize, null);
     sendPacketWrapper(synPacket);
-    System.out.println(synPacket.getDebugOutput());
+    System.out.println(synPacket.toString());
+//    System.out.println(synPacket.getDebugOutput());
 
     while (tcpState != State.ESTABLISHED){
       try {
@@ -281,8 +282,10 @@ class StudentSocketImpl extends BaseSocketImpl {
    */
   private TCPTimerTask createTimerTask(long delay, Object ref){
     saveState = tcpState;
-    if(tcpTimer == null)
+    if(tcpTimer == null) {
       tcpTimer = new Timer(false);
+      System.out.println("create new timer!");
+    }
     return new TCPTimerTask(tcpTimer, delay, this, ref);
   }
 
@@ -315,16 +318,15 @@ class StudentSocketImpl extends BaseSocketImpl {
   private synchronized void cancelTimer(){
     tcpTimer.cancel();
     tcpTimer = null;
-    System.out.println("!!! cancel timer");
+//    System.out.println("!!! cancel timer");
   }
 
   public void sendPacketWrapper(TCPPacket p){
     if(p.synFlag || p.finFlag){
       lastPacket = p;
       createTimerTask(2500,null);
-      System.out.println("create timer!!!!");
     }
-    System.out.println("=============================================================="+ System.currentTimeMillis()+p.toString());
+//    System.out.println("=============================================================="+ System.currentTimeMillis()+p.toString());
     TCPWrapper.send(p, address);
   }
 
